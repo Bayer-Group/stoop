@@ -18,18 +18,15 @@ case class DB(name: String) {
   implicit val BadExecutionContext: scala.concurrent.ExecutionContext = null
   if (!isDBName(name)) sys.error(s"invalid database name: $name")
 
-  //private[this] def swdb[A](a: NeedsDB[Free[NeedsDB, Couch[A]]]): Couch[A] =
-  //  Suspend(WithDB(this, Suspend(a)))
-
   /** A pure value that requires this database name but does nothing with it. */
-  private def pure[A](a: A): Couch[A] = Return(a)
+  def pure[A](a: A): Couch[A] = Free.pure(a)
 
   /**
    * Creates a new document. Returns an error or the created revision and a boolean.
    * The boolean indicates whether the response was 202, which may need special handling.
    */
   def sensitiveNewNamedDoc[A:JsonWriter](doc: Option[Doc], json: A, params: Map[String, JsValue] = Map.empty): Couch[String \/ (Doc, Rev, Boolean)] =
-    Suspend(NewDoc(this, doc, json.toJson, params, pure))
+    liftF(NewDoc(this, doc, json.toJson, params, a => a))
 
   /**
    * Creates a new document with the given name and contents.
@@ -39,11 +36,11 @@ case class DB(name: String) {
 
   /** Update a document revision */
   def updateDoc[A:JsonWriter](doc: Doc, rev: Rev, json: A, params: Map[String, JsValue] = Map.empty): Couch[Option[(Doc, Rev)]] =
-    Suspend(UpdateDoc(this, doc, rev, json.toJson, params, pure))
+    liftF(UpdateDoc(this, doc, rev, json.toJson, params, a => a))
 
   /** Bulk-update documents. Revisions and IDs should be part of the JSON for each doc. */
   def bulkUpdateDocs[A:JsonWriter](jsons: Seq[A], params: Map[String, JsValue] = Map.empty): Couch[Option[List[BulkOperationFailure \/ BulkOperationSuccess]]] =
-    Suspend(BulkUpdateDocs(this, jsons.map(_.toJson), params, pure))
+    liftF(BulkUpdateDocs(this, jsons.map(_.toJson), params, a => a))
 
   /**
    * Delete a document by docID, assuming the latest revision.
@@ -61,11 +58,11 @@ case class DB(name: String) {
 
   /** Gets a document as a raw map of JSON values. */
   def getDocPrim(doc: Doc, params: Map[String, JsValue] = Map.empty): Couch[Option[(Doc, Rev, Map[String, JsValue])]] =
-    Suspend(GetDoc(this, doc, params, x => pure(x map(_.map(_.asJsObject.fields)))))
+    liftF(GetDoc(this, doc, params, x => x map(_.map(_.asJsObject.fields))))
 
   /** Delete a document given a particular revision. */
   def deleteDoc(doc: Doc, rev: Rev, params: Map[String, JsValue] = Map.empty): Couch[Boolean] =
-    Suspend(DeleteDoc(this, doc, rev, params, pure))
+    liftF(DeleteDoc(this, doc, rev, params, a => a))
 
   /** Create a new document with a generated name. */
   def newDoc[A:JsonWriter](json: A, params: Map[String, JsValue] = Map.empty): Couch[(Doc, Rev)] = {
@@ -84,7 +81,7 @@ case class DB(name: String) {
 
   /** Retrieve all documents matching the query parameters and deal with them as raw json rows */
   def getAllDocsRaw[A:JsonReader](params: Map[String, JsValue], body: Option[JsValue] = None): Couch[List[A]] =
-    Suspend(GetAllDocsRaw(this, params, body, (x: List[JsValue]) => pure(x.map(_.convertTo[A]))))
+    liftF(GetAllDocsRaw(this, params, body, (x: List[JsValue]) => x.map(_.convertTo[A])))
 
   /**
    * Modify the given document with the given update function
@@ -98,7 +95,7 @@ case class DB(name: String) {
 
   /** Get the IDs of all the documents in the database. */
   def getAllDocIDs(includeDesignDocs: Boolean = false, params: Map[String, JsValue] = Map.empty): Couch[List[Doc]] =
-    Suspend(GetAllDocIDs(this, params, pure, includeDesignDocs))
+    liftF(GetAllDocIDs(this, params, identity, includeDesignDocs))
 
   /** Create views under the given design doc */
   def newView(design: String, views: Seq[CouchView], language: String = "javascript"): Couch[Unit] = {
@@ -122,26 +119,26 @@ case class DB(name: String) {
 
   /** Returns the documents matching the given query. */
   def queryView[A:JsonReader](design: Doc, view: Doc, params: Map[String, JsValue] = Map()): Couch[Map[Option[Doc], A]] =
-    Suspend(QueryViewObjects(this, design, view, params,
-      (x: List[JsValue]) => pure(x.map(row => toRow(row.asJsObject, "value")).
-        map(tup => tup._1.map(Doc.apply) -> tup._2).toMap.mapValues(_.convertTo[A]))
+    liftF(QueryViewObjects(this, design, view, params,
+      (x: List[JsValue]) => x.map(row => toRow(row.asJsObject, "value")).
+        map(tup => tup._1.map(Doc.apply) -> tup._2).toMap.mapValues(_.convertTo[A])
     ))
 
 
   def queryViewDocs[A:JsonReader](design: Doc, view: Doc, params: Map[String, JsValue] = Map("include_docs" -> JsBoolean(true))): Couch[Map[Option[Doc], A]] =
-    Suspend(QueryViewObjects(this, design, view, params,
-      (x: List[JsValue]) => pure(x.map(row => toRow(row.asJsObject, "doc")).
-        map(tup => tup._1.map(Doc.apply) -> tup._2).toMap.mapValues(_.convertTo[A]))
+    liftF(QueryViewObjects(this, design, view, params,
+      (x: List[JsValue]) => x.map(row => toRow(row.asJsObject, "doc")).
+        map(tup => tup._1.map(Doc.apply) -> tup._2).toMap.mapValues(_.convertTo[A])
     ))
 
 
   /** Returns only the IDs of the documents matching the given query. */
   def queryViewKeys(design: Doc, view: Doc, params: Map[String, JsValue] = Map()): Couch[List[Doc]] =
-    Suspend(QueryViewKeys(this, design, view, params, pure))
+    liftF(QueryViewKeys(this, design, view, params, identity))
 
   /** Returns a list of raw JSON objects which must be interpreted by the caller - the most general query results.*/
   def queryViewObjects[A:JsonReader](design: Doc, view: Doc, params: Map[String, JsValue] = Map()): Couch[List[A]] =
-    Suspend(QueryViewObjects(this, design, view, params, (x: List[JsValue]) => pure(x.map (_.convertTo[A]))))
+    liftF(QueryViewObjects(this, design, view, params, (x: List[JsValue]) => x.map (_.convertTo[A])))
 
   /**
    * Get the given attachment from the given document, reading it through the given `Channel`.
@@ -154,7 +151,7 @@ case class DB(name: String) {
                                     sink: Channel[Task, Bytes, A],
                                     bufferSize: Int = 65536,
                                     params: Map[String, JsValue] = Map.empty): Couch[A] =
-    Suspend(GetBinary(this, doc, attachmentName, sink, Monoid[A], bufferSize, params, pure[A]))
+    liftF(GetBinary(this, doc, attachmentName, sink, Monoid[A], bufferSize, params, identity[A]))
 
 
   /**
@@ -164,7 +161,7 @@ case class DB(name: String) {
    * convenience method for now).
    */
   def getBinaryAttachmentToFile(doc: Doc, attachmentName: String, filePath: String, params: Map[String, JsValue] = Map.empty): Couch[Boolean] =
-    Suspend(GetBinaryFile(this, doc, attachmentName, filePath, params, pure))
+    liftF(GetBinaryFile(this, doc, attachmentName, filePath, params, identity))
 
   /**
    * Download the given attachment from the given document, saving it to a file at the given path.
@@ -188,7 +185,7 @@ case class DB(name: String) {
                    rev: Option[Rev] = None,
                    body: File,
                    params: Map[String, JsValue] = Map.empty): Couch[Option[(Doc, Rev)]] =
-    Suspend(AttachBinary(this, doc, attachmentName, contentLength, contentType, rev, body, params, pure))
+    liftF(AttachBinary(this, doc, attachmentName, contentLength, contentType, rev, body, params, identity))
 
 //  /**
 //   * Attach the text from the given string to the given document revision.

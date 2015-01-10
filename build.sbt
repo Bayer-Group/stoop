@@ -10,13 +10,15 @@ scalacOptions += "-feature"
 
 resolvers += "Sonatype snapshots" at "http://oss.sonatype.org/content/repositories/snapshots/"
 
+resolvers += "Scalaz Bintray Repo" at "http://dl.bintray.com/scalaz/releases"
+
 resolvers += "spray repo" at "http://repo.spray.io"
 
 libraryDependencies ++= Seq("org.scalaz" %% "scalaz-core" % "7.1.0",
                             "io.spray" %% "spray-json" % "1.2.5",
                             "org.scalaz" %% "scalaz-effect" % "7.1.0",
                             "org.scalaz" %% "scalaz-concurrent" % "7.1.0",
-                            "org.scalaz.stream" %% "scalaz-stream" % "0.1")
+                            "org.scalaz.stream" %% "scalaz-stream" % "0.6a")
 
 libraryDependencies += "net.databinder.dispatch" %% "dispatch-core" % "0.10.0"
 
