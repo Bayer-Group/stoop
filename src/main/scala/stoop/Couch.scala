@@ -112,7 +112,7 @@ case class DB(name: String) {
       r <- newNamedDoc(Doc(path), body)
       _ <- r.fold(
         _ => getAndUpdateDoc(Doc(path), update).map(
-               _.getOrElse(sys.error("Creation of the design document $design failed."))),
+               _.getOrElse(sys.error(s"Creation of the design document $design failed."))),
         _ => commit)
     } yield ()
   }
